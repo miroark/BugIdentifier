@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Bug Identifier</string>
+    <string name="take_picture">Take picture</string>
+</resources>
