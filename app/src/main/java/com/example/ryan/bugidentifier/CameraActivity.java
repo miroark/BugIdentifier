@@ -29,7 +29,9 @@ import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
-import android.widget.Button;
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.BitmapFactory;
 import android.widget.Toast;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -42,8 +44,8 @@ import java.util.Arrays;
 import java.util.List;
 
 public class CameraActivity extends AppCompatActivity {
+    public static final String IMAGE_ID = "IMG_ID";
     private static final String TAG = "BugIdentifier";
-    private Button takePictureButton;
     private TextureView textureView;
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
     static {
@@ -62,23 +64,25 @@ public class CameraActivity extends AppCompatActivity {
     private static final int REQUEST_CAMERA_PERMISSION = 200;
     private Handler mBackgroundHandler;
     private HandlerThread mBackgroundThread;
+    private DatabaseHelper databaseHelper;
 
 //-----------------------------------------------------------------------------------------------------
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera);
+
         textureView = findViewById(R.id.texture);
         assert textureView != null;
         textureView.setSurfaceTextureListener(textureListener);
-        takePictureButton = findViewById(R.id.btn_takepicture);
-        assert takePictureButton != null;
-        takePictureButton.setOnClickListener(new View.OnClickListener() {
+        textureView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 takePicture();
             }
         }); //end of listener
+
+        databaseHelper = new DatabaseHelper(this);
     } //end of onCreate()
 
     @Override
@@ -178,9 +182,10 @@ public class CameraActivity extends AppCompatActivity {
 
     protected void takePicture() {
         if(cameraDevice == null) {
-            Log.e(TAG, "cameraDevice is null");
+            Toast.makeText(CameraActivity.this, "Error: cameraDevice is null.",Toast.LENGTH_SHORT).show();
             return;
         }
+
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         try {
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
@@ -190,15 +195,23 @@ public class CameraActivity extends AppCompatActivity {
                 jpegSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.JPEG);
             }
 
+            //default sizes
             int width = 640;
             int height = 480;
-
+            /*
+            For one reason or another, setting a higher resolution causes the configuration of the capture session
+            to take too long to be completed by the time the capture is called. For now I'm just setting the default and leaving it at that.
+            This may actually be a set resolution to help with interpretation by the AI further down the line to help simplify the input layer.
+            
             if (jpegSizes != null && 0 < jpegSizes.length) {
+                // get/set the correct sizez
                 width = jpegSizes[0].getWidth();
                 height = jpegSizes[0].getHeight();
             }
+            */
 
             ImageReader reader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 1);
+
             List<Surface> outputSurfaces = new ArrayList<Surface>(2);
             outputSurfaces.add(reader.getSurface());
             outputSurfaces.add(new Surface(textureView.getSurfaceTexture()));
@@ -210,6 +223,7 @@ public class CameraActivity extends AppCompatActivity {
             // Orientation
             int rotation = getWindowManager().getDefaultDisplay().getRotation();
             captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
+
             final File file = new File(Environment.getExternalStorageDirectory()+"/pic.jpg");
 
             ImageReader.OnImageAvailableListener readerListener = new ImageReader.OnImageAvailableListener() {
@@ -219,6 +233,7 @@ public class CameraActivity extends AppCompatActivity {
                     try {
                         image = reader.acquireLatestImage();
                         ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                        buffer.rewind();
                         byte[] bytes = new byte[buffer.capacity()];
                         buffer.get(bytes);
                         save(bytes);
@@ -235,8 +250,14 @@ public class CameraActivity extends AppCompatActivity {
                 private void save(byte[] bytes) throws IOException {
                     OutputStream output = null;
                     try {
-                        output = new FileOutputStream(file);
-                        output.write(bytes);
+                        //save the image
+                        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                        //TODO: Send the bitmap to the AI for evaluation.
+                        String evaluation = "Beetle";
+                        BitmapDrawable drawable = new BitmapDrawable(getResources(), bitmap);
+                        databaseHelper.insetImage(drawable, IMAGE_ID, evaluation);
+                        //output = new FileOutputStream(file);
+                        //output.write(bytes);
                     } finally {
                         if (null != output) {
                             output.close();
@@ -254,7 +275,8 @@ public class CameraActivity extends AppCompatActivity {
                     Toast.makeText(CameraActivity.this, "Saved: " + file, Toast.LENGTH_SHORT).show();
                     createCameraPreview();
                 }
-            };
+            }; // end of capture listener instantiation
+
             cameraDevice.createCaptureSession(outputSurfaces, new CameraCaptureSession.StateCallback() {
 
                 @Override
@@ -268,9 +290,9 @@ public class CameraActivity extends AppCompatActivity {
 
                 @Override
                 public void onConfigureFailed(CameraCaptureSession session) {
-                    Toast.makeText(CameraActivity.this, "Error: Configuration failed.",Toast.LENGTH_SHORT).show();
+                    Toast.makeText(CameraActivity.this, "Error: Configuration for capture session failed.",Toast.LENGTH_SHORT).show();
                 }
-            }, mBackgroundHandler);
+            }, mBackgroundHandler); //end of captureSession
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -284,6 +306,7 @@ public class CameraActivity extends AppCompatActivity {
             Surface surface = new Surface(texture);
             captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             captureRequestBuilder.addTarget(surface);
+
             cameraDevice.createCaptureSession(Arrays.asList(surface), new CameraCaptureSession.StateCallback(){
                 @Override
                 public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
