@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">Bug Identifier</string>
-    <string name="take_picture">Take picture</string>
+    <string name="view_pictures">View Pictures</string>
+    <string name="insect_id">Insect Id</string>
+    <string name="image_id">Image ID</string>
+    <string name="correction_button_text">Submit Correction</string>
 </resources>

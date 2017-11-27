@@ -2,6 +2,7 @@ package com.example.ryan.bugidentifier;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
@@ -32,21 +33,20 @@ import android.view.View;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.BitmapFactory;
+import android.widget.Button;
 import android.widget.Toast;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-public class CameraActivity extends AppCompatActivity {
+public class CameraActivity extends AppCompatActivity{
     public static final String IMAGE_ID = "IMG_ID";
-    private static final String TAG = "BugIdentifier";
+    private static final String TAG = "CameraActivity";
     private TextureView textureView;
+    private Button switchActivityButton;
+
     private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
     static {
         ORIENTATIONS.append(Surface.ROTATION_0, 90);
@@ -60,11 +60,10 @@ public class CameraActivity extends AppCompatActivity {
     protected CaptureRequest.Builder captureRequestBuilder;
     private Size imageDimension;
     private ImageReader imageReader;
-    private File file;
     private static final int REQUEST_CAMERA_PERMISSION = 200;
     private Handler mBackgroundHandler;
     private HandlerThread mBackgroundThread;
-    private DatabaseHelper databaseHelper;
+    public static DatabaseHelper databaseHelper;
 
 //-----------------------------------------------------------------------------------------------------
     @Override
@@ -72,9 +71,11 @@ public class CameraActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera);
 
+        databaseHelper = new DatabaseHelper(this);
+
         textureView = findViewById(R.id.texture);
         assert textureView != null;
-        textureView.setSurfaceTextureListener(textureListener);
+
         textureView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -82,7 +83,17 @@ public class CameraActivity extends AppCompatActivity {
             }
         }); //end of listener
 
-        databaseHelper = new DatabaseHelper(this);
+        switchActivityButton = findViewById(R.id.switchButton);
+        assert switchActivityButton != null;
+        switchActivityButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent myIntent = new Intent(CameraActivity.this, ListActivity.class);
+                startActivity(myIntent);
+            }
+        }); //end of button listener
+
+        Log.e("CameraActivity", "onCreate");
     } //end of onCreate()
 
     @Override
@@ -158,7 +169,7 @@ public class CameraActivity extends AppCompatActivity {
         @Override
         public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
-            Toast.makeText(CameraActivity.this, "Saved:" + file, Toast.LENGTH_SHORT).show();
+            Toast.makeText(CameraActivity.this, "Saved Picture", Toast.LENGTH_SHORT).show();
             createCameraPreview();
         }
     };
@@ -188,21 +199,14 @@ public class CameraActivity extends AppCompatActivity {
 
         CameraManager manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
         try {
-            CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraDevice.getId());
-            Size[] jpegSizes = null;
-
-            if (characteristics != null) {
-                jpegSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.JPEG);
-            }
-
             //default sizes
-            int width = 640;
-            int height = 480;
+            int width = 64;
+            int height = 48;
             /*
             For one reason or another, setting a higher resolution causes the configuration of the capture session
             to take too long to be completed by the time the capture is called. For now I'm just setting the default and leaving it at that.
             This may actually be a set resolution to help with interpretation by the AI further down the line to help simplify the input layer.
-            
+
             if (jpegSizes != null && 0 < jpegSizes.length) {
                 // get/set the correct sizez
                 width = jpegSizes[0].getWidth();
@@ -224,8 +228,6 @@ public class CameraActivity extends AppCompatActivity {
             int rotation = getWindowManager().getDefaultDisplay().getRotation();
             captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
 
-            final File file = new File(Environment.getExternalStorageDirectory()+"/pic.jpg");
-
             ImageReader.OnImageAvailableListener readerListener = new ImageReader.OnImageAvailableListener() {
                 @Override
                 public void onImageAvailable(ImageReader reader) {
@@ -237,8 +239,6 @@ public class CameraActivity extends AppCompatActivity {
                         byte[] bytes = new byte[buffer.capacity()];
                         buffer.get(bytes);
                         save(bytes);
-                    } catch (FileNotFoundException e) {
-                        e.printStackTrace();
                     } catch (IOException e) {
                         e.printStackTrace();
                     } finally {
@@ -248,21 +248,16 @@ public class CameraActivity extends AppCompatActivity {
                     }
                 }
                 private void save(byte[] bytes) throws IOException {
-                    OutputStream output = null;
-                    try {
-                        //save the image
-                        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                        //TODO: Send the bitmap to the AI for evaluation.
-                        String evaluation = "Beetle";
-                        BitmapDrawable drawable = new BitmapDrawable(getResources(), bitmap);
-                        databaseHelper.insetImage(drawable, IMAGE_ID, evaluation);
-                        //output = new FileOutputStream(file);
-                        //output.write(bytes);
-                    } finally {
-                        if (null != output) {
-                            output.close();
-                        }
-                    }
+                    //save the image
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    /*TODO: Send the bitmap to the AI for evaluation. The AI bit is FAAAAAR in the future though.
+                     * For now the below string is the stand in for the evaluation.
+                     */
+                    String evaluation = "Beetle";
+                    BitmapDrawable drawable = new BitmapDrawable(getResources(), bitmap);
+                    //TODO: create a unique image id for every picture.
+                    databaseHelper.insertImage(drawable, IMAGE_ID, evaluation);
+                    Log.e("CameraActivity", "save image");
                 }
             };
 
@@ -272,7 +267,7 @@ public class CameraActivity extends AppCompatActivity {
                 @Override
                 public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
                     super.onCaptureCompleted(session, request, result);
-                    Toast.makeText(CameraActivity.this, "Saved: " + file, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(CameraActivity.this, "Saved Picture", Toast.LENGTH_SHORT).show();
                     createCameraPreview();
                 }
             }; // end of capture listener instantiation
@@ -320,7 +315,7 @@ public class CameraActivity extends AppCompatActivity {
                 }
                 @Override
                 public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
-                    Toast.makeText(CameraActivity.this, "Configuration change", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(CameraActivity.this, "Error: Processor failed to configure in time.", Toast.LENGTH_SHORT).show();
                 }
             }, null);
         } catch (CameraAccessException e) {
@@ -333,6 +328,7 @@ public class CameraActivity extends AppCompatActivity {
         Log.e(TAG, "opening camera");
         try {
             cameraId = manager.getCameraIdList()[0];
+            //TODO : Handle null object in cameraId
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             assert map != null;
